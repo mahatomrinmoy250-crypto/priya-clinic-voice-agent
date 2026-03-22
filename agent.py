@@ -22,7 +22,7 @@ from livekit.plugins import openai, sarvam, silero, deepgram
 logger = logging.getLogger("priya-clinic")
 logging.basicConfig(level=logging.INFO)
 
-# ── ENV ──────────────────────────────────────────────────────────────
+# ENV
 LIVEKIT_URL        = os.getenv("LIVEKIT_URL", "")
 GROQ_API_KEY       = os.getenv("GROQ_API_KEY", "")
 SARVAM_API_KEY     = os.getenv("SARVAM_API_KEY", "")
@@ -32,13 +32,13 @@ CAL_EVENT_TYPE_ID  = os.getenv("CAL_EVENT_TYPE_ID", "")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID   = os.getenv("TELEGRAM_CHAT_ID", "")
 
-# ── CLINIC CONFIG ────────────────────────────────────────────────────
+# CLINIC CONFIG
 CLINIC_NAME   = "Priya Clinic"
 DOCTOR_NAME   = "Dr. Sharma"
 CLINIC_TIMING = "Somvar se Shanivar, subah 9 baje se shaam 7 baje tak"
 TIMEZONE      = "Asia/Kolkata"
 
-# ── TELEGRAM HELPER ─────────────────────────────────────────────────
+
 async def send_telegram(text: str):
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
         return
@@ -49,19 +49,14 @@ async def send_telegram(text: str):
     except Exception as e:
         logger.warning(f"Telegram send failed: {e}")
 
-# ── CAL.COM BOOKING HELPER ───────────────────────────────────────────
+
 async def book_cal_appointment(patient_name: str, date: str, time: str, reason: str) -> dict:
-    """
-    date format: YYYY-MM-DD
-    time format: HH:MM  (24h, IST)
-    """
     try:
         ist = pytz.timezone(TIMEZONE)
         dt_str = f"{date}T{time}:00"
         dt_naive = datetime.strptime(dt_str, "%Y-%m-%dT%H:%M:%S")
         dt_ist   = ist.localize(dt_naive)
         start_utc = dt_ist.astimezone(pytz.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
-
         payload = {
             "eventTypeId": int(CAL_EVENT_TYPE_ID),
             "start": start_utc,
@@ -90,10 +85,10 @@ async def book_cal_appointment(patient_name: str, date: str, time: str, reason: 
         logger.error(f"book_cal_appointment exception: {e}")
         return {"success": False, "error": str(e)}
 
-# ── TOOLS ────────────────────────────────────────────────────────────
+
 class ClinicTools:
-    def __init__(self, session_ref: list):
-        self._session = session_ref  # mutable ref, filled after session created
+    def __init__(self):
+        pass
 
     @llm.ai_callable(description="Patient ka appointment book karo. date YYYY-MM-DD format mein do, time HH:MM 24-hour IST mein do.")
     async def book_appointment(
@@ -106,20 +101,22 @@ class ClinicTools:
         logger.info(f"Booking: {patient_name} on {date} at {time} for {reason}")
         result = await book_cal_appointment(patient_name, date, time, reason)
         if result["success"]:
-            msg = (f"\u2705 Appointment Booked!\n"
-                   f"Patient: {patient_name}\nDate: {date}  Time: {time} IST\n"
-                   f"Reason: {reason}\nBooking ID: {result['booking_id']}")
+            msg = (
+                "Appointment Booked!\n"
+                f"Patient: {patient_name}\nDate: {date}  Time: {time} IST\n"
+                f"Reason: {reason}\nBooking ID: {result['booking_id']}"
+            )
             await send_telegram(msg)
             return f"Appointment book ho gaya hai {patient_name} ke liye {date} ko {time} baje. Booking ID: {result['booking_id']}"
         else:
-            return f"Maafi chahti hoon, abhi booking mein thodi problem aa rahi hai. Kripya clinic mein directly call karein."
+            return "Maafi chahti hoon, abhi booking mein thodi problem aa rahi hai. Kripya clinic mein directly call karein."
 
     @llm.ai_callable(description="Call khatam karo jab patient ki baat ho jaye ya woh phone rakhna chahein.")
     async def end_call(self) -> str:
-        await send_telegram(f"\u{1F4DE} Call ended — {CLINIC_NAME}")
-        return "Bahut shukriya! {CLINIC_NAME} mein aapka swagat hai. Khyal rakhein, namaskar!"
+        await send_telegram(f"Call ended - {CLINIC_NAME}")
+        return f"Bahut shukriya! {CLINIC_NAME} mein aapka swagat hai. Khyal rakhein, namaskar!"
 
-# ── AGENT ────────────────────────────────────────────────────────────
+
 class PriyaAgent(Agent):
     def __init__(self, tools: ClinicTools):
         super().__init__(
@@ -140,20 +137,18 @@ class PriyaAgent(Agent):
             instructions=f"Namaskar! Aap {CLINIC_NAME} mein aa gaye hain. Main Priya hoon. Aap ka kya kaam ho sakta hai?"
         )
 
-# ── ENTRYPOINT ───────────────────────────────────────────────────────
+
 async def entrypoint(ctx: JobContext):
     await ctx.connect()
     logger.info("Room connected")
 
-    # Caller identity
     caller_id = "Unknown"
     for pid, p in ctx.room.remote_participants.items():
         caller_id = p.identity or pid
         break
 
-    await send_telegram(f"\u{1F4F2} Incoming Call\nCaller: {caller_id}\nClinic: {CLINIC_NAME}")
+    await send_telegram(f"Incoming Call\nCaller: {caller_id}\nClinic: {CLINIC_NAME}")
 
-    # STT — prefer Deepgram if key present
     if DEEPGRAM_API_KEY:
         stt_plugin = deepgram.STT(model="nova-2-general", language="hi")
     else:
@@ -164,7 +159,6 @@ async def entrypoint(ctx: JobContext):
             sample_rate=16000
         )
 
-    # LLM — Groq
     llm_plugin = openai.LLM(
         model="llama-3.3-70b-versatile",
         base_url="https://api.groq.com/openai/v1",
@@ -172,7 +166,6 @@ async def entrypoint(ctx: JobContext):
         max_completion_tokens=120,
     )
 
-    # TTS — Sarvam Priya voice
     tts_plugin = sarvam.TTS(
         target_language_code="hi-IN",
         model="bulbul:v2",
@@ -180,11 +173,9 @@ async def entrypoint(ctx: JobContext):
         speech_sample_rate=24000,
     )
 
-    # VAD
     vad_plugin = silero.VAD.load()
 
-    session_ref: list = []
-    tools = ClinicTools(session_ref)
+    tools = ClinicTools()
     agent = PriyaAgent(tools)
 
     session = AgentSession(
@@ -193,7 +184,6 @@ async def entrypoint(ctx: JobContext):
         tts=tts_plugin,
         vad=vad_plugin,
     )
-    session_ref.append(session)
 
     await session.start(
         agent=agent,
@@ -202,7 +192,7 @@ async def entrypoint(ctx: JobContext):
     )
     logger.info("AgentSession started for caller: %s", caller_id)
 
-# ── MAIN ─────────────────────────────────────────────────────────────
+
 if __name__ == "__main__":
     cli.run_app(
         WorkerOptions(
