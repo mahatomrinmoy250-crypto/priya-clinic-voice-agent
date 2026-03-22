@@ -1,0 +1,4 @@
+livekit-agents[deepgram,openai,silero,sarvam]>=1.0.0
+httpx>=0.27.0
+python-dotenv>=1.0.0
+pytz>=2024.1
